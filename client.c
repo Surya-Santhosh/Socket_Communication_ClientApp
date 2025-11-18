@@ -46,14 +46,39 @@ int main()
     // To set receive timeout 
     clientSetTimeout(&unSocket, &unTimeout);
     clientConnect(&unSocket, &unConnect);
-    
-    // Read Querry string.
-    int8 *pcMessage = getenv("QUERY_STRING");
-    
-    if (pcMessage != NULL) 
+
+    int8 *pcMethod = getenv("REQUEST_METHOD");
+
+    // Get request
+    if (0 == strcmp(pcMethod, "GET")) 
     {
-        // Extract string from qurey string.
-        sscanf(pcMessage, "msg=%s", ucBuffer);
+        int8 *pcMessage = getenv("QUERY_STRING");
+
+        if (pcMessage != NULL)
+        {
+            sscanf(pcMessage, "msg=%s", ucBuffer);
+        }
+    }
+    // Post request
+    else if (0 == strcmp(pcMethod, "POST"))
+    {
+        int8 *pcLength = getenv("CONTENT_LENGTH");
+
+        // To convert string to an integer.
+        uint16 unLength = atoi(pcLength);
+        int8 *pcData = malloc(unLength + 1);
+
+        fread(pcData, 1, unLength, stdin);
+
+        pcData[unLength] = '\0';
+
+        // To convert JSON String to object.
+        cJSON *pJsonObject = cJSON_Parse(pcData);
+        cJSON *pMessage = cJSON_GetObjectItem(pJsonObject, "msg");
+
+        strcpy(ucBuffer, pMessage->valuestring);
+        free(pcData);
+        cJSON_Delete(pJsonObject);
     }
 
     send(unSocket, ucBuffer, sizeof(ucBuffer), 0);
