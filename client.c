@@ -54,7 +54,7 @@ int main()
     {
         int8 *pcMessage = getenv("QUERY_STRING");
 
-        if (pcMessage != NULL)
+        if (NULL != pcMessage)
         {
             sscanf(pcMessage, "msg=%s", ucBuffer);
         }
@@ -81,7 +81,7 @@ int main()
         cJSON_Delete(pJsonObject);
     }
 
-    send(unSocket, ucBuffer, sizeof(ucBuffer), 0);
+    send(unSocket, ucBuffer, strlen(ucBuffer), 0);
 
     // Receive size of the server response.
     recv(unSocket, &unBufferLength, sizeof(unBufferLength), 0);
@@ -97,7 +97,7 @@ int main()
 
     pucRecievedBuffer[unBufferLength] = '\0';
 
-    printf("%s\n", pucRecievedBuffer);
+    printf("%s", pucRecievedBuffer);
 
     // Deallocate dynamically allocated memory.
     free(pucRecievedBuffer);
