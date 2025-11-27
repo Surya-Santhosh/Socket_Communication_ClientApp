@@ -20,6 +20,8 @@
 #include <arpa/inet.h>
 #include <cjson/cJSON.h>
 #include <unistd.h>
+#include <limits.h>
+#include <dirent.h>
 
 //**************************** Global Types ************************************
 typedef unsigned short uint16;
@@ -29,11 +31,17 @@ typedef char int8;
 typedef signed short int16;
 
 //************************* Global Constants ***********************************
-#define MAX_CHAR_SIZE               (20)
-#define PORT                        (8080)
-#define CLIENT_RECEIVE_TIMEOUT      (2)
-#define ERROR_CODE                  (-1)
-#define IP_ADDRESS                  ("172.24.253.157")
+#define UPLOAD_DIR                       "/var/www/uploads/"
+#define FILE_LIST_PATH                   "/var/www/uploads/files.txt"
+#define NUM_FILES                        (20)
+#define FILENAME_SIZE                    (50)
+#define FILE_PATH_SIZE                   (256)
+#define FILE_CONTENT_SIZE                (512)
+#define ERROR_CODE                       (-1)
+#define IP_ADDRESS                       ("172.24.253.157")
+#define PORT                             (8080)
+#define EXTRA_BUFFER_SIZE                (20)
+#define CLIENT_RECEIVE_TIMEOUT           (2)
 
 //************************* Global Variables *********************************** 
 

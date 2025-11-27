@@ -20,9 +20,11 @@
 //**************************** Local Variables *********************************
 
 //***************************** Local Functions ********************************
-static bool clientSocket(uint16* punSocket);
-static bool clientConnect(uint16* punSocket, uint16* punConnect);
-static bool clientSetTimeout(uint16* punSocket, uint16* punTimeout);
+static bool clientSocket(int16* punSocket);
+static bool clientConnect(int16* punSocket, int16* punConnect);
+static bool clientSetTimeout(int16* punSocket, int16* punTimeout);
+static bool clientFileUpload(uint8* pucBuffer);
+static bool clientRequestHandler(int8* pcMethod, uint8** ppucBuffer);
 
 //*****************************.mainFunction.***********************************
 // Purpose : Handle client side socket communication to send user commands to 
@@ -34,13 +36,15 @@ static bool clientSetTimeout(uint16* punSocket, uint16* punTimeout);
 //******************************************************************************
 int main()
 {
-    uint16 unSocket = 0;
-    uint16 unConnect = 0;
+    int16 unSocket = 0;
+    int16 unConnect = 0;
     uint16 unTimeout = 0;
-    uint16 unBufferLength = 0;
-    uint8 ucBuffer[MAX_CHAR_SIZE] = "";
-    uint8 *pucRecievedBuffer = NULL;
+    uint8 ucValidation = 0;
+    uint16 unReceivedBufferLength = 0;
+    uint8 *pucSendBuffer = NULL;
+    uint8 *pucReceivedBuffer = NULL;
 
+    printf("Content-type: application/json\r\n\r\n");
     clientSocket(&unSocket);
 
     // To set receive timeout 
@@ -49,58 +53,38 @@ int main()
 
     int8 *pcMethod = getenv("REQUEST_METHOD");
 
-    // Get request
-    if (0 == strcmp(pcMethod, "GET")) 
+    if (NULL != pcMethod)
     {
-        int8 *pcMessage = getenv("QUERY_STRING");
+        // 
+        clientRequestHandler(pcMethod, &pucSendBuffer);
+        send(unSocket, pucSendBuffer, strlen((char*)pucSendBuffer), 0);
 
-        if (NULL != pcMessage)
+        // Receive size of the server response.
+        recv(unSocket, &unReceivedBufferLength, sizeof(unReceivedBufferLength), 
+             0);
+
+        // Dynamically allocate memory for receive buffer.
+        // +1 for null terminator.
+        pucReceivedBuffer = malloc(unReceivedBufferLength + 1);
+
+        if (ERROR_CODE == recv(unSocket, pucReceivedBuffer, 
+                               unReceivedBufferLength, 0))
         {
-            sscanf(pcMessage, "msg=%s", ucBuffer);
+            close(unSocket);
         }
+
+        pucReceivedBuffer[unReceivedBufferLength] = '\0';
+        printf("%s", pucReceivedBuffer);
+
+        // Deallocate dynamically allocated memory.
+        free(pucSendBuffer);
+        free(pucReceivedBuffer);
     }
-    // Post request
-    else if (0 == strcmp(pcMethod, "POST"))
+    else
     {
-        int8 *pcLength = getenv("CONTENT_LENGTH");
-
-        // To convert string to an integer.
-        uint16 unLength = atoi(pcLength);
-        int8 *pcData = malloc(unLength + 1);
-
-        fread(pcData, 1, unLength, stdin);
-
-        pcData[unLength] = '\0';
-
-        // To convert JSON String to object.
-        cJSON *pJsonObject = cJSON_Parse(pcData);
-        cJSON *pMessage = cJSON_GetObjectItem(pJsonObject, "msg");
-
-        strcpy(ucBuffer, pMessage->valuestring);
-        free(pcData);
-        cJSON_Delete(pJsonObject);
+        printf("Invalid Request");
     }
 
-    send(unSocket, ucBuffer, strlen(ucBuffer), 0);
-
-    // Receive size of the server response.
-    recv(unSocket, &unBufferLength, sizeof(unBufferLength), 0);
-
-    // Dynamically allocate memory for receive buffer.
-    // +1 for null terminator.
-    pucRecievedBuffer = malloc(unBufferLength + 1);
-
-    if (ERROR_CODE == recv(unSocket, pucRecievedBuffer, unBufferLength, 0))
-    {
-        close(unSocket);
-    }
-
-    pucRecievedBuffer[unBufferLength] = '\0';
-
-    printf("%s", pucRecievedBuffer);
-
-    // Deallocate dynamically allocated memory.
-    free(pucRecievedBuffer);
     close(unSocket);
 
     return 0;
@@ -113,7 +97,7 @@ int main()
 // Return  : blReturn
 // Notes   : None
 //******************************************************************************
-static bool clientSocket(uint16* punSocket)
+static bool clientSocket(int16* punSocket)
 {
     bool blReturn = false;
 
@@ -142,7 +126,7 @@ static bool clientSocket(uint16* punSocket)
 // Return  : blReturn
 // Notes   : None
 //******************************************************************************
-static bool clientConnect(uint16* punSocket, uint16* punConnect)
+static bool clientConnect(int16* punSocket, int16* punConnect)
 {
     bool blReturn = false;
 
@@ -152,7 +136,7 @@ static bool clientConnect(uint16* punSocket, uint16* punConnect)
     stSocketAddress.sin_port = htons(PORT);
     stSocketAddress.sin_addr.s_addr = inet_addr(IP_ADDRESS);
 
-    if (NULL != punSocket)
+    if ((NULL != punSocket) && (NULL != punConnect))
     {
         *punConnect = connect(*punSocket, (struct sockaddr *) &stSocketAddress, 
                                sizeof(stSocketAddress));
@@ -178,7 +162,7 @@ static bool clientConnect(uint16* punSocket, uint16* punConnect)
 // Return  : blReturn
 // Notes   : None
 //******************************************************************************
-static bool clientSetTimeout(uint16* punSocket, uint16* punTimeout)
+static bool clientSetTimeout(int16* punSocket, int16* punTimeout)
 {
     bool blReturn = false;
 
@@ -199,6 +183,167 @@ static bool clientSetTimeout(uint16* punSocket, uint16* punTimeout)
         {
             blReturn = true;
         }
+    }
+
+    return blReturn;
+}
+
+//**************************.clientRequestHandler.******************************
+// Purpose : Handle POST/GET request and prepare the request buffer to be sent
+//           to the server.
+// Inputs  : pcMethod - Pointer to the Request method.
+//         : ppucBuffer - Pointer to the buffer to be sent to the server.
+// Outputs : none
+// Return  : blReturn
+// Notes   : None
+//******************************************************************************
+static bool clientRequestHandler(int8 *pcMethod, uint8 **ppucBuffer)
+{
+    bool blReturn = false;
+    uint16 unSendBufferLength = 0;
+
+    if ((NULL != pcMethod) && (NULL != ppucBuffer))
+    {
+        // Get request
+        if (0 == strcmp(pcMethod, "GET")) 
+        {
+            int8 *pcMessage = getenv("QUERY_STRING");
+
+            if (NULL != strstr(pcMessage, "msg=list"))
+            {
+                *ppucBuffer = malloc(FILENAME_SIZE);
+                memset(*ppucBuffer, 0, FILENAME_SIZE);
+                strcpy(*ppucBuffer, "List");
+            }
+            else
+            {
+                unSendBufferLength = strlen(pcMessage) + EXTRA_BUFFER_SIZE;
+                *ppucBuffer = malloc(unSendBufferLength);
+                snprintf((char*)*ppucBuffer, unSendBufferLength, "type=GET&%s", 
+                         pcMessage);
+            }
+        }
+        // Post request
+        else if (0 == strcmp(pcMethod, "POST"))
+        {
+            int8 *pcMessage = getenv("QUERY_STRING");
+
+            if (NULL != strstr(pcMessage, "msg=upload"))
+            {
+                *ppucBuffer = malloc(FILENAME_SIZE);
+                memset(*ppucBuffer, 0, FILENAME_SIZE);
+                clientFileUpload(*ppucBuffer);
+            }
+            else
+            {
+                char *pcLength = getenv("CONTENT_LENGTH");
+
+                if (NULL != pcLength)
+                {
+                    uint16 unLength = atoi(pcLength);
+                    uint8 *pcData = malloc(unLength + 1);
+                    fread(pcData, 1, unLength, stdin);
+                    pcData[unLength] = '\0';
+                    unSendBufferLength = unLength + EXTRA_BUFFER_SIZE;
+                    *ppucBuffer = malloc(unSendBufferLength);
+                    snprintf(*ppucBuffer, unSendBufferLength, "type=POST&%s", 
+                             pcData);
+                    free(pcData);
+                }
+                else
+                {
+                    printf("Invalid Request");
+                }
+            }
+        }
+        else
+        {
+            printf("Invalid Request Method");
+        }
+
+        blReturn = true;
+    }
+
+    return blReturn;
+}
+
+//****************************.clientFileUpload.********************************
+// Purpose : File upload from the POST request extract filename ,save it locally
+//         : and forward filename to the server.
+// Inputs  : pucBuffer - Pointer to the buffer to be sent to the server.
+// Outputs : none
+// Return  : blReturn
+// Notes   : None
+//******************************************************************************
+static bool clientFileUpload(uint8 *pucBuffer) 
+{
+    bool blReturn = false;
+    uint16 unFullPathLength = 0;
+    FILE *pstFile = NULL;
+    int8 *pcContentLength = getenv("CONTENT_LENGTH");
+    int8 *pcContentType  = getenv("CONTENT_TYPE");
+
+    if ((NULL != pucBuffer) && (NULL != pcContentLength) && 
+        (NULL != pcContentType))
+    {
+        uint16 unLength = atoi(pcContentLength);
+        int8 *pcData = malloc(unLength + 1);
+
+        fread(pcData, 1, unLength, stdin);
+
+        pcData[unLength] = '\0';
+
+        // Extract file name.
+        int8 *pcFileNameStart = strstr(pcData, "filename=\"");
+        pcFileNameStart += strlen("filename=\"");
+        int8 *pcFileNameEnd = strchr(pcFileNameStart, '"');
+        uint8 ucFileNameLength = pcFileNameEnd - pcFileNameStart;
+        int8 *pcFilename = malloc(ucFileNameLength + 1);
+
+        snprintf(pcFilename, ucFileNameLength +1, "%s", pcFileNameStart);
+
+        // Extract file content.
+        int8 *pcFileContentStart = strstr(pcFileNameEnd, "\r\n\r\n");
+        pcFileContentStart += 4; 
+        int8 *pcBoundaryStart = strstr(pcContentType, "boundary=");
+        pcBoundaryStart += strlen("boundary=");
+        int8 *pcBoundary = malloc(strlen(pcBoundaryStart) + 3);
+
+        sprintf(pcBoundary, "%s", pcBoundaryStart);
+
+        int8 *pcBoundaryEnd = strstr(pcFileContentStart, pcBoundary);
+        int8 *pcFileContentEnd = pcBoundaryEnd;
+
+        if ((pcFileContentEnd - 2 >= pcFileContentStart) && 
+            (pcFileContentEnd[-2] == '\r') && (pcFileContentEnd[-1] == '\n'))
+        {
+            pcFileContentEnd -= 2;
+        }
+
+        uint32 ulFileSize = pcFileContentEnd - pcFileContentStart;
+
+        // Save file locally.
+        unFullPathLength = strlen(UPLOAD_DIR) + strlen(pcFilename);
+        int8 *pcFullPath = malloc(unFullPathLength + 1);
+
+        sprintf(pcFullPath, "%s%s", UPLOAD_DIR, pcFilename);
+        sprintf(pucBuffer, "FilePath:%s", pcFullPath);
+
+        pstFile = fopen(pcFullPath, "wb");
+
+        if (NULL != pstFile) 
+        {
+            fwrite(pcFileContentStart, 1, ulFileSize, pstFile);
+        }
+
+        printf("{\"filename\":\"%s\",\"path\":\"%s\"}\n", pcFilename, 
+               pcFullPath);
+        free(pcFilename);
+        free(pcBoundary);
+        free(pcFullPath);
+        free(pcData);
+
+        blReturn = true;
     }
 
     return blReturn;
